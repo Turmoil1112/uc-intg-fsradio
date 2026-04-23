@@ -4,7 +4,6 @@ import asyncio
 import logging
 import socket
 from dataclasses import dataclass
-from typing import Iterable
 from urllib.parse import urlparse
 
 _LOG = logging.getLogger("discover")
@@ -38,6 +37,9 @@ class DiscoveredRadio:
         parsed = urlparse(self.location)
         host = parsed.hostname or self.address
         port = parsed.port or 80
+        path = parsed.path.rstrip("/")
+        if path.endswith("/device"):
+            return f"http://{host}:{port}{path}"
         return f"http://{host}:{port}/device"
 
 

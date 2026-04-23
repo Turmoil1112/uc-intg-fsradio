@@ -86,7 +86,7 @@ class FrontierSiliconMediaPlayer(MediaPlayer):
             if cmd_id == Commands.PREVIOUS:
                 await self._client.previous()
                 return StatusCodes.OK
-        except Exception as exc:  # pragma: no cover - device/lib dependent
+        except Exception as exc:
             _LOG.warning("[%s] command %s failed: %s", self._device_config.name, cmd_id, exc)
             return StatusCodes.SERVICE_UNAVAILABLE
 

@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
-
-_LOG = logging.getLogger("config")
 
 
 @dataclass(slots=True)
@@ -90,14 +87,20 @@ def create_device(name: str, address: str, base_url: str, pin: int, timeout: flo
     )
 
 
-def create_entity_id(device_id: str, entity_type: str = "media_player") -> str:
+def create_entity_id(device_id: str, entity_type: str = "media_player", suffix: str | None = None) -> str:
     if entity_type == "media_player":
-        return device_id
-    return f"{entity_type}.{device_id}"
+        return device_id if not suffix else f"{device_id}.{suffix}"
+    base = f"{entity_type}.{device_id}"
+    return base if suffix is None else f"{base}.{suffix}"
 
 
 def device_from_entity_id(entity_id: str) -> str:
-    return entity_id.split(".", 1)[-1] if "." in entity_id else entity_id
+    if entity_id.startswith("button."):
+        remainder = entity_id[len("button."):]
+        return remainder.split(".", 1)[0]
+    if "." in entity_id:
+        return entity_id.split(".", 1)[-1].split(".", 1)[0]
+    return entity_id
 
 
 devices: Devices

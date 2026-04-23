@@ -4,7 +4,7 @@
   "min_core_api": "0.20.0",
   "name": {
     "en": "Frontier Silicon Radio",
-    "de": "Frontier-Silicon-Radio"
+    "de": "Frontier Silicon Radio"
   },
   "icon": "uc:integration",
   "description": {
@@ -12,11 +12,11 @@
     "de": "Steuere Frontier-Silicon-Radios mit der Remote 3."
   },
   "developer": {
-    "name": "OpenAI scaffold",
-    "email": "noreply@example.com",
-    "url": "https://github.com/unfoldedcircle/integration-androidtv"
+    "name": "Turmoil1112",
+    "email": "urethane5824@proton.me",
+    "url": "https://github.com/Turmoil1112"
   },
-  "home_page": "https://github.com/unfoldedcircle/integration-python-library",
+  "home_page": "https://github.com/Turmoil1112/uc-intg-fsradio",
   "setup_data_schema": {
     "title": {
       "en": "Integration setup",

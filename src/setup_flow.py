@@ -3,9 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from enum import IntEnum
-from urllib.parse import urlparse
 
-import ucapi
 from ucapi import (
     AbortDriverSetup,
     DriverSetupRequest,
@@ -119,6 +117,7 @@ async def _handle_discovery(msg: UserDataResponse) -> SetupAction:
 async def _handle_choice(msg: UserDataResponse) -> SetupAction:
     global _pending_choice, _setup_step
     choice = str(msg.input_values["choice"])
+    _pending_choice = None
     for item in _discovered:
         if item.address == choice:
             _pending_choice = item
@@ -158,6 +157,8 @@ async def _handle_pin(msg: UserDataResponse) -> SetupAction:
     except Exception as exc:
         _LOG.warning("Failed to validate radio %s: %s", _pending_choice.address, exc)
         return SetupError(error_type=IntegrationSetupError.AUTHORIZATION_ERROR)
+    finally:
+        await client.close()
 
     existing = config.devices.get_by_address(_pending_choice.address)
     if existing:

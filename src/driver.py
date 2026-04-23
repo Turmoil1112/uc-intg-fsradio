@@ -14,7 +14,8 @@ from ucapi.media_player import Attributes as MediaAttr
 import config
 import media_player
 import setup_flow
-from fsradio.client import FrontierSiliconClient
+from fsradio.client import FrontierSiliconClient, FrontierSiliconState
+from preset_button import FrontierSiliconPresetButton
 
 _LOG = logging.getLogger("driver")
 
@@ -27,6 +28,7 @@ api = ucapi.IntegrationAPI(_LOOP)
 
 _clients: dict[str, FrontierSiliconClient] = {}
 _poll_tasks: dict[str, asyncio.Task[Any]] = {}
+_preset_entity_ids: dict[str, set[str]] = {}
 
 
 @api.listens_to(ucapi.Events.CONNECT)
@@ -88,10 +90,11 @@ async def _poll_device(device: config.RadioDevice) -> None:
             state = await client.get_state()
             attrs = entity.attributes_from_state(state)
             api.configured_entities.update_attributes(device_id, attrs)
-        except Exception as exc:  # pragma: no cover - device/lib dependent
+            _sync_preset_entities(device, client, state)
+        except Exception as exc:
             _LOG.warning("[%s] polling failed: %s", device.name, exc)
             api.configured_entities.update_attributes(device_id, {MediaAttr.STATE: "unavailable"})
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(2.0)
 
 
 def _stop_poller(device_id: str) -> None:
@@ -115,17 +118,43 @@ async def _stop_all_pollers_and_clients() -> None:
         await _stop_runtime(device_id)
 
 
-def _register_entity(device: config.RadioDevice, client: FrontierSiliconClient) -> None:
+def _register_media_player(device: config.RadioDevice, client: FrontierSiliconClient) -> None:
     entity = media_player.FrontierSiliconMediaPlayer(device, client)
     if api.available_entities.contains(entity.id):
         api.available_entities.remove(entity.id)
     api.available_entities.add(entity)
 
 
+def _sync_preset_entities(device: config.RadioDevice, client: FrontierSiliconClient, state: FrontierSiliconState) -> None:
+    desired_ids: set[str] = set()
+    for preset in state.presets:
+        button = FrontierSiliconPresetButton(device, client, preset)
+        desired_ids.add(button.id)
+        if api.available_entities.contains(button.id):
+            api.available_entities.remove(button.id)
+        api.available_entities.add(button)
+
+    previous_ids = _preset_entity_ids.get(device.id, set())
+    for entity_id in previous_ids - desired_ids:
+        if api.available_entities.contains(entity_id):
+            api.available_entities.remove(entity_id)
+        if api.configured_entities.contains(entity_id):
+            api.configured_entities.remove(entity_id)
+    _preset_entity_ids[device.id] = desired_ids
+
+
+def _remove_preset_entities(device_id: str) -> None:
+    for entity_id in _preset_entity_ids.pop(device_id, set()):
+        if api.available_entities.contains(entity_id):
+            api.available_entities.remove(entity_id)
+        if api.configured_entities.contains(entity_id):
+            api.configured_entities.remove(entity_id)
+
+
 def _ensure_runtime(device: config.RadioDevice) -> None:
     if device.id not in _clients:
         _clients[device.id] = FrontierSiliconClient(device.base_url, device.pin, device.timeout)
-    _register_entity(device, _clients[device.id])
+    _register_media_player(device, _clients[device.id])
     if device.id not in _poll_tasks:
         _poll_tasks[device.id] = _LOOP.create_task(_poll_device(device))
 
@@ -141,10 +170,12 @@ def on_device_removed(device: config.RadioDevice | None) -> None:
         _LOOP.create_task(_stop_all_pollers_and_clients())
         api.available_entities.clear()
         api.configured_entities.clear()
+        _preset_entity_ids.clear()
         return
 
     _LOG.info("Configured radio removed: %s", device.name)
     _LOOP.create_task(_stop_runtime(device.id))
+    _remove_preset_entities(device.id)
     api.available_entities.remove(device.id)
     api.configured_entities.remove(device.id)
 
