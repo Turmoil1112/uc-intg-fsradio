@@ -1,19 +1,19 @@
 # Frontier Silicon Radio integration scaffold for Unfolded Circle Remote 3
 
-Dieses Projekt ist ein lauffähiges Grundgerüst für eine externe Unfolded-Circle-Integration auf Basis von:
+This project provides a working scaffold for an external Unfolded Circle integration based on:
 
-- `ucapi`
-- `afsapi`
-- SSDP-Discovery für Frontier-Silicon-Radios
+* `ucapi`
+* `afsapi`
+* SSDP discovery for Frontier Silicon radios
 
-## Enthalten
+## Included
 
-- `FrontierSiliconClient` Adapter um die asynchrone `afsapi`-Library
-- SSDP-Discovery
-- JSON-basierte Konfiguration im `UC_CONFIG_HOME`
-- Setup-Flow mit Discovery, manueller IP und PIN-Eingabe
-- `media-player`-Entity mit Basis-Mediensteuerung
-- Polling-Loop für Status-Updates
+* `FrontierSiliconClient` adapter wrapping the asynchronous `afsapi` library
+* SSDP discovery
+* JSON-based configuration in `UC_CONFIG_HOME`
+* Setup flow with discovery, manual IP entry, and PIN input
+* `media-player` entity with basic media controls
+* Polling loop for status updates
 
 ## Start
 
@@ -27,12 +27,18 @@ UC_CONFIG_HOME=./config UC_DATA_HOME=./data python3 src/driver.py
 ## Build
 
 ```bash
-docker run --rm --name builder   --platform=aarch64   --user=$(id -u):$(id -g)   -v "$PWD":/workspace   docker.io/unfoldedcircle/r2-pyinstaller:3.11.13   bash -c "python -m pip install -r requirements.txt &&            pyinstaller --clean --onedir --name intg-fsradio src/driver.py"
+docker run --rm --name builder \
+  --platform=aarch64 \
+  --user=$(id -u):$(id -g) \
+  -v "$PWD":/workspace \
+  docker.io/unfoldedcircle/r2-pyinstaller:3.11.13 \
+  bash -c "python -m pip install -r requirements.txt && \
+           pyinstaller --clean --onedir --name intg-fsradio src/driver.py"
 ```
 
-## Hinweise
+## Notes
 
-- Das Gerüst ist bewusst konservativ und robust gehalten.
-- `afsapi` wird asynchron über `AFSAPI.create(...)` initialisiert und über einen eigenen Adapter gekapselt.
-- Einige FSAPI-Funktionen unterscheiden sich je nach Radio-Modell. Deshalb kapselt `FrontierSiliconClient` alle direkten Bibliothekszugriffe an einer Stelle.
-- Presets, Browse, Favoriten, Sleep, Alarm und tieferes Quellen-Mapping sind als nächster Ausbau gedacht.
+* The scaffold is intentionally conservative and robust.
+* `afsapi` is initialized asynchronously via `AFSAPI.create(...)` and encapsulated in a dedicated adapter.
+* Some FSAPI functions vary depending on the radio model. Therefore, `FrontierSiliconClient` centralizes all direct library interactions.
+* Presets, browsing, favorites, sleep, alarm, and more advanced source mapping are planned as future enhancements.
