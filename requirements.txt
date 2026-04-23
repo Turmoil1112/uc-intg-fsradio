@@ -1,0 +1,4 @@
+ucapi>=0.5.2
+requests>=2.32
+lxml>=5.2
+afsapi>=1.0.0

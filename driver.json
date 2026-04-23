@@ -1,0 +1,44 @@
+{
+  "driver_id": "fsradio",
+  "version": "0.1.0",
+  "min_core_api": "0.20.0",
+  "name": {
+    "en": "Frontier Silicon Radio",
+    "de": "Frontier-Silicon-Radio"
+  },
+  "icon": "uc:integration",
+  "description": {
+    "en": "Control Frontier Silicon radios with Remote 3.",
+    "de": "Steuere Frontier-Silicon-Radios mit der Remote 3."
+  },
+  "developer": {
+    "name": "OpenAI scaffold",
+    "email": "noreply@example.com",
+    "url": "https://github.com/unfoldedcircle/integration-androidtv"
+  },
+  "home_page": "https://github.com/unfoldedcircle/integration-python-library",
+  "setup_data_schema": {
+    "title": {
+      "en": "Integration setup",
+      "de": "Integrationssetup"
+    },
+    "settings": [
+      {
+        "id": "info",
+        "label": {
+          "en": "Setup process",
+          "de": "Setup-Fortschritt"
+        },
+        "field": {
+          "label": {
+            "value": {
+              "en": "The integration discovers Frontier Silicon radios via SSDP. You can also enter an IP address manually. For command execution the radio PIN is required.",
+              "de": "Die Integration findet Frontier-Silicon-Radios per SSDP. Alternativ kann eine IP-Adresse manuell eingegeben werden. Für Befehle wird die Radio-PIN benötigt."
+            }
+          }
+        }
+      }
+    ]
+  },
+  "release_date": "2026-04-22"
+}
