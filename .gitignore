@@ -1,3 +1,4 @@
 build/
 dist/
 intg-fsradio.spec
+fsradio-radio-metadata.patch

@@ -84,7 +84,7 @@ class FrontierSiliconClient:
                     presets,
                     title=metadata["media_title"],
                     artist=metadata["media_artist"],
-                    channel=metadata["channel_name"],
+                    channel=metadata["media_album"],
                 )
 
                 return FrontierSiliconState(
@@ -281,6 +281,7 @@ class FrontierSiliconClient:
         channel_name: str | None = None
         media_title: str | None = None
         media_artist: str | None = None
+        media_album: str | None = play_album
 
         if source_cf in {"internet radio", "netradio", "radio", "ir", "network"}:
             channel_name = play_name
@@ -329,6 +330,15 @@ class FrontierSiliconClient:
                     channel_name = preset.name
                     break
 
+        # UC media-player has no official channel_name field.
+        # Expose the station name via media_album instead.
+        if channel_name:
+            if not media_album or media_album.casefold() in {"unknown", "n/a"}:
+                media_album = channel_name
+
+        if not media_title and channel_name:
+            media_title = channel_name
+
         if channel_name and media_title and channel_name.casefold() == media_title.casefold() and media_artist:
             # keep channel and title equal only when artist exists; otherwise prefer useful title fallback
             pass
@@ -341,16 +351,15 @@ class FrontierSiliconClient:
             play_artist,
             play_album,
             play_image,
-            channel_name,
             media_title,
             media_artist,
+            media_album,
         )
 
         return {
-            "channel_name": channel_name,
             "media_title": media_title,
             "media_artist": media_artist,
-            "media_album": play_album,
+            "media_album": media_album,
             "media_image_url": play_image,
         }
 

@@ -118,6 +118,7 @@ class FrontierSiliconMediaPlayer(MediaPlayer):
             Attributes.MEDIA_ARTIST: state.media_artist,
             Attributes.MEDIA_ALBUM: state.media_album,
             Attributes.MEDIA_IMAGE_URL: state.media_image_url,
+            Attributes.MEDIA_TYPE: "radio",
         }
         if state.media_position is not None:
             attrs[Attributes.MEDIA_POSITION] = state.media_position
