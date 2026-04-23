@@ -3,6 +3,9 @@
 This project provides a complete Python-based integration scaffold for controlling
 Frontier Silicon radios with the Unfolded Circle Remote 3.
 
+## Disclaimer on AI Usage
+After trying to manually convert the Android TV integration to use afsapi the code was kind of working for a simple setup (including SSDP) but the code was as ugly as it gets. I scrapped the whole project and started from scratch using ChatGPT. So most of the code was created with the assistance of ChatGPT.
+
 ## Features
 
 * SSDP-based discovery of Frontier Silicon devices
