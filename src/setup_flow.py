@@ -9,7 +9,6 @@ from ucapi_framework import BaseSetupFlow, DiscoveredDevice
 
 from config import RadioConfigManager, RadioDeviceConfig
 from fsradio.client import FrontierSiliconClient
-from fsradio.discovery import DiscoveredRadio, discover_radios
 from fsradio.framework_discovery import FrontierSiliconSSDPDiscovery
 
 _LOG = logging.getLogger("setup_flow")
