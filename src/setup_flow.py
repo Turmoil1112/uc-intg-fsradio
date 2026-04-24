@@ -42,17 +42,70 @@ class FrontierSiliconSetupFlow(BaseSetupFlow[RadioDeviceConfig]):
 
     def get_manual_entry_form(self) -> RequestUserInput:
         return RequestUserInput(
-            {"en": "Find radio", "de": "Radio finden"},
+            {"en": "Frontier Silicon Radio setup", "de": "Frontier-Silicon-Radio einrichten"},
             [
                 {
+                    "id": "mode",
+                    "label": {"en": "Setup mode", "de": "Setup-Modus"},
+                    "field": {
+                        "dropdown": {
+                            "value": "discover",
+                            "items": [
+                                {
+                                    "id": "discover",
+                                    "label": {
+                                        "en": "Discover radio automatically",
+                                        "de": "Radio automatisch suchen",
+                                    },
+                                },
+                                {
+                                    "id": "manual",
+                                    "label": {
+                                        "en": "Add radio manually",
+                                        "de": "Radio manuell hinzufügen",
+                                    },
+                                },
+                                {
+                                    "id": "backup",
+                                    "label": {
+                                        "en": "Create configuration backup",
+                                        "de": "Konfigurations-Backup erstellen",
+                                    },
+                                },
+                                {
+                                    "id": "restore",
+                                    "label": {
+                                        "en": "Restore configuration backup",
+                                        "de": "Konfigurations-Backup wiederherstellen",
+                                    },
+                                },
+                            ],
+                        }
+                    },
+                },
+                {
                     "id": "address",
-                    "label": {"en": "IP address (optional)", "de": "IP-Adresse (optional)"},
-                    "field": {"text": {"value": ""}},
+                    "label": {
+                        "en": "IP address (manual setup only)",
+                        "de": "IP-Adresse (nur bei manueller Einrichtung)",
+                    },
+                    "field": {
+                        "text": {
+                            "value": "",
+                        }
+                    },
                 },
                 {
                     "id": "timeout",
-                    "label": {"en": "HTTP timeout in seconds", "de": "HTTP-Timeout in Sekunden"},
-                    "field": {"number": {"value": 2}},
+                    "label": {
+                        "en": "HTTP timeout in seconds",
+                        "de": "HTTP-Timeout in Sekunden",
+                    },
+                    "field": {
+                        "number": {
+                            "value": 2,
+                        }
+                    },
                 },
             ],
         )
@@ -159,27 +212,37 @@ class FrontierSiliconSetupFlow(BaseSetupFlow[RadioDeviceConfig]):
         return self.get_manual_entry_form()
 
     async def handle_user_data_response(self, msg: ucapi.UserDataResponse) -> ucapi.SetupAction:
-        """
-        Process responses for all subsequent setup screens.
-
-        UC returns values from all previous screens in msg.input_values.
-        """
         values = msg.input_values or {}
         _LOG.debug("handle_user_data_response input_values=%s", values)
 
-        # Final step: PIN entered -> validate and finish
+        # Restore submitted
+        if "restore_json" in values:
+            backup_json = str(values.get("restore_json", "")).strip()
+            if not backup_json:
+                return SetupError(error_type=IntegrationSetupError.OTHER)
+
+            try:
+                self.config_manager.restore_from_backup_json(backup_json)
+                if hasattr(self.driver, "register_all_device_instances"):
+                    await self.driver.register_all_device_instances(connect=False)
+                return SetupComplete()
+            except Exception as exc:
+                _LOG.warning("Backup restore failed: %s", exc)
+                return SetupError(error_type=IntegrationSetupError.OTHER)
+
+        # Final device setup step
         if "step2.pin" in values:
             address = str(values.get("address", "")).strip()
             base_url = None
+            usn = None
 
-            # Discovery path: a choice was made on step 1
             choice = str(values.get("step1.choice", "")).strip()
             if choice and choice in self._discovered:
                 selected = self._discovered[choice]
                 address = selected.address
                 base_url = str(selected.extra_data.get("base_url") or f"http://{address}:80/device")
+                usn = selected.extra_data.get("usn")
 
-            # Manual path: address came from the first screen
             if not address:
                 return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
 
@@ -189,7 +252,7 @@ class FrontierSiliconSetupFlow(BaseSetupFlow[RadioDeviceConfig]):
                     "base_url": base_url,
                     "pin": values.get("step2.pin"),
                     "timeout": values.get("step2.timeout", values.get("timeout", self._last_timeout)),
-                    "usn": selected.extra_data.get("usn"),
+                    "usn": usn,
                 }
             )
 
@@ -198,19 +261,62 @@ class FrontierSiliconSetupFlow(BaseSetupFlow[RadioDeviceConfig]):
 
             self.config_manager.add_or_update(config_or_error)
 
-            # Re-register configured device instances so the new config becomes active.
             if hasattr(self.driver, "register_all_device_instances"):
                 await self.driver.register_all_device_instances(connect=False)
 
             return SetupComplete()
 
-        # Step 1 submitted
-        address = str(values.get("address", "")).strip()
+        mode = str(values.get("mode", "discover")).strip()
+
+        # Backup screen
+        if mode == "backup":
+            try:
+                backup_json = self.config_manager.get_backup_json()
+            except Exception as exc:
+                _LOG.warning("Backup creation failed: %s", exc)
+                return SetupError(error_type=IntegrationSetupError.OTHER)
+
+            return RequestUserInput(
+                {"en": "Configuration backup", "de": "Konfigurations-Backup"},
+                [
+                    {
+                        "id": "backup_json",
+                        "label": {"en": "Backup JSON", "de": "Backup-JSON"},
+                        "field": {
+                            "textarea": {
+                                "value": backup_json,
+                            }
+                        },
+                    }
+                ],
+            )
+
+        # Restore input screen
+        if mode == "restore":
+            return RequestUserInput(
+                {"en": "Restore backup", "de": "Backup wiederherstellen"},
+                [
+                    {
+                        "id": "restore_json",
+                        "label": {"en": "Backup JSON", "de": "Backup-JSON"},
+                        "field": {
+                            "textarea": {
+                                "value": "",
+                            }
+                        },
+                    }
+                ],
+            )
+
         timeout = float(values.get("timeout", self._last_timeout) or self._last_timeout)
         self._last_timeout = timeout
 
-        # Manual IP path: ask for PIN directly
-        if address:
+        # Manual setup path
+        if mode == "manual":
+            address = str(values.get("address", "")).strip()
+            if not address:
+                return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
+
             return RequestUserInput(
                 {"en": "Enter PIN", "de": "PIN eingeben"},
                 [
@@ -232,7 +338,7 @@ class FrontierSiliconSetupFlow(BaseSetupFlow[RadioDeviceConfig]):
                 ],
             )
 
-        # Discovery path: no address entered, so run SSDP
+        # Discovery setup path
         devices = await self.discover_devices(values)
         if not devices:
             return SetupError(error_type=IntegrationSetupError.NOT_FOUND)

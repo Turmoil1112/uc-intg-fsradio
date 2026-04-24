@@ -6,7 +6,7 @@
     "en": "Frontier Silicon Radio",
     "de": "Frontier Silicon Radio"
   },
-  "icon": "uc:integration",
+  "icon": "uc:music",
   "description": {
     "en": "Control Frontier Silicon radios with Remote 3.",
     "de": "Steuere Frontier-Silicon-Radios mit der Remote 3."
@@ -32,13 +32,28 @@
         "field": {
           "label": {
             "value": {
-              "en": "The integration discovers Frontier Silicon radios via SSDP. You can also enter an IP address manually. For command execution the radio PIN is required.",
-              "de": "Die Integration findet Frontier-Silicon-Radios per SSDP. Alternativ kann eine IP-Adresse manuell eingegeben werden. Für Befehle wird die Radio-PIN benötigt."
+              "en": "The integration discovers Frontier Silicon radios via SSDP. You can also enter an IP address manually. For command execution the radio PIN is required. The setup flow also provides options to create or restore a configuration backup.",
+              "de": "Die Integration findet Frontier-Silicon-Radios per SSDP. Alternativ kann eine IP-Adresse manuell eingegeben werden. Für Befehle wird die Radio-PIN benötigt. Der Setup-Flow bietet außerdem Optionen zum Erstellen oder Wiederherstellen eines Konfigurations-Backups."
+            }
+          }
+        }
+      },
+      {
+        "id": "setup_mode_info",
+        "label": {
+          "en": "Available setup options",
+          "de": "Verfügbare Setup-Optionen"
+        },
+        "field": {
+          "label": {
+            "value": {
+              "en": "Available modes: discover a radio automatically, add a radio manually, create a backup, or restore a backup.",
+              "de": "Verfügbare Modi: Radio automatisch suchen, Radio manuell hinzufügen, Backup erstellen oder Backup wiederherstellen."
             }
           }
         }
       }
     ]
   },
-  "release_date": "2026-04-23"
+  "release_date": "2026-04-22"
 }
