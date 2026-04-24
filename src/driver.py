@@ -13,6 +13,8 @@ from config import RadioConfigManager, RadioDeviceConfig
 from device import FrontierSiliconDevice
 from media_player import FrontierSiliconMediaPlayer
 from preset_button import FrontierSiliconPresetButton
+
+from fsradio.framework_discovery import FrontierSiliconSSDPDiscovery
 from setup_flow import FrontierSiliconSetupFlow
 
 
@@ -25,6 +27,7 @@ class FrontierSiliconDriver(BaseIntegrationDriver[FrontierSiliconDevice, RadioDe
 
 
 async def main() -> None:
+    # Logging setup
     if os.getenv("INVOCATION_ID"):
         handler = logging.StreamHandler()
         logging.basicConfig(handlers=[handler])
@@ -35,11 +38,14 @@ async def main() -> None:
         )
 
     level = os.getenv("UC_LOG_LEVEL", "DEBUG").upper()
-    for logger_name in ("driver", "device", "setup_flow", "media_player", "fsradio.client", "discover"):
+    for logger_name in ("driver", "device", "setup_flow", "fsradio"):
         logging.getLogger(logger_name).setLevel(level)
 
     loop = asyncio.get_running_loop()
 
+    # -------------------------
+    # Driver init (IMPORTANT)
+    # -------------------------
     driver = FrontierSiliconDriver(
         device_class=FrontierSiliconDevice,
         entity_classes=[
@@ -53,6 +59,9 @@ async def main() -> None:
         driver_id="fsradio",
     )
 
+    # -------------------------
+    # Config Manager (CRITICAL)
+    # -------------------------
     config_manager = RadioConfigManager(
         driver.api.config_dir_path,
         add_handler=driver.on_device_added,
@@ -61,17 +70,30 @@ async def main() -> None:
     )
     driver.config_manager = config_manager
 
-    setup_flow = FrontierSiliconSetupFlow(driver=driver, config_manager=config_manager)
-    driver.setup_flow = setup_flow
+    # -------------------------
+    # SSDP Discovery (Framework)
+    # -------------------------
+    discovery = FrontierSiliconSSDPDiscovery(timeout=5)
 
-    async def driver_setup_handler(msg: ucapi.SetupDriver) -> ucapi.SetupAction:
-        if isinstance(msg, ucapi.DriverSetupRequest):
-            return await setup_flow.handle_driver_setup(msg)
-        if isinstance(msg, ucapi.UserDataResponse):
-            return await setup_flow.handle_user_data_response(msg)
-        return ucapi.SetupError()
+    # -------------------------
+    # Setup Flow (Unified API)
+    # -------------------------
+    setup_handler = FrontierSiliconSetupFlow.create_handler(
+        driver,
+        discovery=discovery,
+    )
 
-    await driver.api.init("driver.json", driver_setup_handler)
+    # -------------------------
+    # Register existing devices
+    # -------------------------
+    await driver.register_all_device_instances(connect=False)
+
+    # -------------------------
+    # Start UC API
+    # -------------------------
+    await driver.api.init("driver.json", setup_handler)
+
+    # Keep process alive
     await asyncio.Event().wait()
 
 
