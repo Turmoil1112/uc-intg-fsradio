@@ -1,4 +1,6 @@
-ucapi>=0.5.2
+ucapi>=0.6.0
+ucapi-framework>=1.9.1
 requests>=2.32
 lxml>=5.2
 afsapi>=1.0.0
+ssdpy>=0.4.1

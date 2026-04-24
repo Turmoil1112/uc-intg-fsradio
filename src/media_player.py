@@ -3,125 +3,128 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ucapi import EntityTypes, MediaPlayer, StatusCodes
-from ucapi.media_player import Attributes, Commands, DeviceClasses, Features
+from ucapi import EntityTypes, StatusCodes, media_player
+from ucapi_framework import Entity, create_entity_id
 
-import config
-from fsradio.client import FrontierSiliconClient, FrontierSiliconState
+from config import RadioDeviceConfig
+from device import FrontierSiliconDevice
 
 _LOG = logging.getLogger("media_player")
 
 
-class FrontierSiliconMediaPlayer(MediaPlayer):
-    def __init__(self, device_config: config.RadioDevice, client: FrontierSiliconClient) -> None:
+class FrontierSiliconMediaPlayer(media_player.MediaPlayer, Entity):
+    def __init__(self, device_config: RadioDeviceConfig, device: FrontierSiliconDevice) -> None:
         self._device_config = device_config
-        self._client = client
-        entity_id = config.create_entity_id(device_config.id, EntityTypes.MEDIA_PLAYER)
+        self._device = device
+        entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, device_config.identifier)
         super().__init__(
             entity_id,
             device_config.name,
-            [
-                Features.ON_OFF,
-                Features.VOLUME,
-                Features.VOLUME_UP_DOWN,
-                Features.MUTE_TOGGLE,
-                Features.SELECT_SOURCE,
-                Features.PLAY_PAUSE,
-                Features.STOP,
-                Features.NEXT,
-                Features.PREVIOUS,
+            features=[
+                media_player.Features.ON_OFF,
+                media_player.Features.VOLUME,
+                media_player.Features.VOLUME_UP_DOWN,
+                media_player.Features.MUTE_TOGGLE,
+                media_player.Features.SELECT_SOURCE,
+                media_player.Features.PLAY_PAUSE,
+                media_player.Features.STOP,
+                media_player.Features.NEXT,
+                media_player.Features.PREVIOUS,
             ],
-            {
-                Attributes.STATE: "unknown",
-                Attributes.SOURCE_LIST: [],
+            attributes={
+                media_player.Attributes.STATE: media_player.States.UNKNOWN,
+                media_player.Attributes.SOURCE_LIST: [],
             },
-            device_class=DeviceClasses.SPEAKER,
+            device_class=media_player.DeviceClasses.SPEAKER,
+            cmd_handler=self.handle_command,
         )
+        self.subscribe_to_device(device)
 
-    async def command(self, cmd_id: str, params: dict[str, Any] | None = None, *, websocket: Any) -> StatusCodes:
+    async def sync_state(self) -> None:
+        state = self._device.state
+        play_status = (state.play_status or "").lower()
+
+        if state.power is False:
+            mapped_state = media_player.States.OFF
+        elif play_status in {"play", "playing"}:
+            mapped_state = media_player.States.PLAYING
+        elif play_status in {"pause", "paused"}:
+            mapped_state = media_player.States.PAUSED
+        elif play_status in {"stop", "stopped"}:
+            mapped_state = media_player.States.STOPPED
+        elif state.power is True:
+            mapped_state = media_player.States.ON
+        else:
+            mapped_state = media_player.States.UNKNOWN
+
+        attrs: dict[str, Any] = {
+            media_player.Attributes.STATE: mapped_state,
+            media_player.Attributes.MUTED: state.muted,
+            media_player.Attributes.VOLUME: state.volume,
+            media_player.Attributes.SOURCE: state.source,
+            media_player.Attributes.SOURCE_LIST: state.source_list,
+            media_player.Attributes.MEDIA_TITLE: state.media_title,
+            media_player.Attributes.MEDIA_ARTIST: state.media_artist,
+            media_player.Attributes.MEDIA_ALBUM: state.media_album,
+            media_player.Attributes.MEDIA_IMAGE_URL: state.media_image_url,
+            media_player.Attributes.MEDIA_TYPE: "radio",
+        }
+        if state.media_position is not None:
+            attrs[media_player.Attributes.MEDIA_POSITION] = state.media_position
+        if state.media_position_updated_at is not None:
+            attrs[media_player.Attributes.MEDIA_POSITION_UPDATED_AT] = state.media_position_updated_at
+
+        self.update({key: value for key, value in attrs.items() if value is not None})
+
+    async def handle_command(self, _entity: Any, cmd_id: str, params: dict[str, Any] | None = None) -> StatusCodes:
         try:
-            if cmd_id == Commands.ON:
-                await self._client.power_on()
+            if cmd_id == media_player.Commands.ON:
+                await self._device.power_on()
                 return StatusCodes.OK
-            if cmd_id == Commands.OFF:
-                await self._client.power_off()
+            if cmd_id == media_player.Commands.OFF:
+                await self._device.power_off()
                 return StatusCodes.OK
-            if cmd_id == Commands.TOGGLE:
-                state = await self._client.get_state()
-                await self._client.set_power(not bool(state.power))
+            if cmd_id == media_player.Commands.TOGGLE:
+                await self._device.set_power(not bool(self._device.state.power))
                 return StatusCodes.OK
-            if cmd_id == Commands.VOLUME_UP:
-                await self._client.volume_up()
+            if cmd_id == media_player.Commands.VOLUME_UP:
+                await self._device.volume_up()
                 return StatusCodes.OK
-            if cmd_id == Commands.VOLUME_DOWN:
-                await self._client.volume_down()
+            if cmd_id == media_player.Commands.VOLUME_DOWN:
+                await self._device.volume_down()
                 return StatusCodes.OK
-            if cmd_id == Commands.VOLUME:
-                await self._client.set_volume((params or {}).get("volume"))
+            if cmd_id == media_player.Commands.VOLUME:
+                await self._device.set_volume((params or {}).get("volume"))
                 return StatusCodes.OK
-            if cmd_id == Commands.MUTE_TOGGLE:
-                await self._client.mute_toggle()
+            if cmd_id == media_player.Commands.MUTE_TOGGLE:
+                await self._device.mute_toggle()
                 return StatusCodes.OK
-            if cmd_id == Commands.SELECT_SOURCE:
+            if cmd_id == media_player.Commands.SELECT_SOURCE:
                 source = (params or {}).get("source")
                 if not source:
                     return StatusCodes.BAD_REQUEST
-                await self._client.select_source(source)
+                await self._device.select_source(source)
                 return StatusCodes.OK
-            if cmd_id == Commands.PLAY_PAUSE:
-                await self._client.play_pause()
+            if cmd_id == media_player.Commands.PLAY_PAUSE:
+                await self._device.play_pause()
                 return StatusCodes.OK
-            if cmd_id == Commands.PLAY:
-                await self._client.play()
+            if cmd_id == media_player.Commands.PLAY:
+                await self._device.play()
                 return StatusCodes.OK
-            if cmd_id == Commands.PAUSE:
-                await self._client.pause()
+            if cmd_id == media_player.Commands.PAUSE:
+                await self._device.pause()
                 return StatusCodes.OK
-            if cmd_id == Commands.STOP:
-                await self._client.stop()
+            if cmd_id == media_player.Commands.STOP:
+                await self._device.stop()
                 return StatusCodes.OK
-            if cmd_id == Commands.NEXT:
-                await self._client.next()
+            if cmd_id == media_player.Commands.NEXT:
+                await self._device.next()
                 return StatusCodes.OK
-            if cmd_id == Commands.PREVIOUS:
-                await self._client.previous()
+            if cmd_id == media_player.Commands.PREVIOUS:
+                await self._device.previous()
                 return StatusCodes.OK
         except Exception as exc:
             _LOG.warning("[%s] command %s failed: %s", self._device_config.name, cmd_id, exc)
             return StatusCodes.SERVICE_UNAVAILABLE
 
-        _LOG.warning("Unsupported command for %s: %s", self._device_config.name, cmd_id)
         return StatusCodes.NOT_IMPLEMENTED
-
-    def attributes_from_state(self, state: FrontierSiliconState) -> dict[str, Any]:
-        play_status = (state.play_status or "").lower()
-        if state.power is False:
-            mapped_state = "off"
-        elif play_status in {"play", "playing"}:
-            mapped_state = "playing"
-        elif play_status in {"pause", "paused"}:
-            mapped_state = "paused"
-        elif play_status in {"stop", "stopped"}:
-            mapped_state = "stopped"
-        elif state.power is True:
-            mapped_state = "on"
-        else:
-            mapped_state = "unknown"
-
-        attrs: dict[str, Any] = {
-            Attributes.STATE: mapped_state,
-            Attributes.MUTED: state.muted,
-            Attributes.VOLUME: state.volume,
-            Attributes.SOURCE: state.source,
-            Attributes.SOURCE_LIST: state.source_list,
-            Attributes.MEDIA_TITLE: state.media_title,
-            Attributes.MEDIA_ARTIST: state.media_artist,
-            Attributes.MEDIA_ALBUM: state.media_album,
-            Attributes.MEDIA_IMAGE_URL: state.media_image_url,
-            Attributes.MEDIA_TYPE: "radio",
-        }
-        if state.media_position is not None:
-            attrs[Attributes.MEDIA_POSITION] = state.media_position
-        if state.media_position_updated_at is not None:
-            attrs[Attributes.MEDIA_POSITION_UPDATED_AT] = state.media_position_updated_at
-        return {key: value for key, value in attrs.items() if value is not None}

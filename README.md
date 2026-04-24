@@ -25,16 +25,31 @@ After trying to manually convert the Android TV integration to use afsapi the co
   * FM
   * Bluetooth
 
+## Migration to ucapi-framework
+
+- keep SSDP discovery working
+- keep manual IP + PIN setup
+- preserve the existing `FrontierSiliconClient`
+- preserve the existing metadata mapping and source handling
+- reduce driver/config boilerplate via `ucapi-framework`
+
 ## Architecture
 
-The integration is structured into clear layers:
+- `config.py` uses `BaseConfigManager`
+- `device.py` uses `PollingDevice`
+- `media_player.py` uses the coordinator pattern via `Entity.subscribe_to_device()`
+- `setup_flow.py` uses `BaseSetupFlow`
+- `driver.py` uses `BaseIntegrationDriver`
 
-* **`afsapi`** → low-level device communication
-* **`FrontierSiliconClient`** → adapter and normalization layer
-* **Entities** → UC-facing media player and preset controls
+## Notes
 
-All device-specific quirks and fallback logic are handled inside the client,
-keeping the rest of the integration simple and stable.
+- Preset buttons are created from preset names cached in the device configuration.
+  The setup flow fetches these during validation, and the polling device refreshes
+  the cached list in config when it changes.
+- Sender/station names are exposed via `media_album`, because the UC media player
+  model does not define a dedicated `channel_name` field.
+- This migration keeps the existing SSDP discovery implementation instead of
+  replacing it with a new one, to preserve compatibility with the current repo.
 
 ## Build
 

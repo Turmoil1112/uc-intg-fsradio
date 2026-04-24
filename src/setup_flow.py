@@ -1,177 +1,260 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from enum import IntEnum
+from uuid import uuid4
 
-from ucapi import (
-    AbortDriverSetup,
-    DriverSetupRequest,
-    IntegrationSetupError,
-    RequestUserInput,
-    SetupAction,
-    SetupComplete,
-    SetupDriver,
-    SetupError,
-    UserDataResponse,
-)
+import ucapi
+from ucapi import IntegrationSetupError, RequestUserInput, SetupComplete, SetupError
+from ucapi_framework import BaseSetupFlow, DiscoveredDevice
 
-import config
+from config import RadioConfigManager, RadioDeviceConfig
 from fsradio.client import FrontierSiliconClient
 from fsradio.discovery import DiscoveredRadio, discover_radios
+from fsradio.framework_discovery import FrontierSiliconSSDPDiscovery
 
 _LOG = logging.getLogger("setup_flow")
 
 
-class SetupSteps(IntEnum):
-    INIT = 0
-    DISCOVER = 1
-    DEVICE_CHOICE = 2
-    PIN = 3
+class FrontierSiliconSetupFlow(BaseSetupFlow[RadioDeviceConfig]):
+    """
+    Conservative setup flow for ucapi-framework.
+
+    Flow:
+    1. Initial screen: optional manual IP + timeout
+    2. If IP was entered: ask for PIN
+       Otherwise: run SSDP discovery and ask user to choose a radio
+    3. Validate against the radio, persist config, finish setup
+    """
+
+    def __init__(self, driver, config_manager: RadioConfigManager) -> None:
+        super().__init__(driver=driver, config_manager=config_manager)
+        self.driver = driver
+        self.config_manager = config_manager
+        self._last_timeout: float = 2.0
+        self._discovered: dict[str, DiscoveredDevice] = {}
+        self._ssdp = FrontierSiliconSSDPDiscovery(timeout=5)
+
+    def _find_existing_by_address(self, address: str) -> RadioDeviceConfig | None:
+        for cfg in self.config_manager.all():
+            if cfg.address == address:
+                return cfg
+        return None
 
 
-_setup_step = SetupSteps.INIT
-_discovered: list[DiscoveredRadio] = []
-_pending_choice: DiscoveredRadio | None = None
+    def get_manual_entry_form(self) -> RequestUserInput:
+        return RequestUserInput(
+            {"en": "Find radio", "de": "Radio finden"},
+            [
+                {
+                    "id": "address",
+                    "label": {"en": "IP address (optional)", "de": "IP-Adresse (optional)"},
+                    "field": {"text": {"value": ""}},
+                },
+                {
+                    "id": "timeout",
+                    "label": {"en": "HTTP timeout in seconds", "de": "HTTP-Timeout in Sekunden"},
+                    "field": {"number": {"value": 2}},
+                },
+            ],
+        )
 
+    async def query_device(self, input_values: dict) -> RadioDeviceConfig | SetupError:
+        """
+        Validate a single radio and build the final config object.
 
-_user_input_discovery = RequestUserInput(
-    {"en": "Discover radio", "de": "Radio finden"},
-    [
-        {
-            "id": "address",
-            "label": {"en": "IP address (optional)", "de": "IP-Adresse (optional)"},
-            "field": {"text": {"value": ""}},
-        },
-        {
-            "id": "timeout",
-            "label": {"en": "HTTP timeout in seconds", "de": "HTTP-Timeout in Sekunden"},
-            "field": {"number": {"value": 2}},
-        },
-    ],
-)
+        Expected input keys:
+        - address
+        - pin
+        - timeout
+        - optional base_url
+        """
+        address = str(input_values.get("address", "")).strip()
+        if not address:
+            return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
 
+        try:
+            pin = int(str(input_values.get("pin", "1234")).strip())
+            timeout = float(input_values.get("timeout", self._last_timeout) or self._last_timeout)
+        except Exception:
+            return SetupError(error_type=IntegrationSetupError.OTHER)
 
-async def driver_setup_handler(msg: SetupDriver) -> SetupAction:
-    global _setup_step
-    if isinstance(msg, DriverSetupRequest):
-        _setup_step = SetupSteps.DISCOVER
-        if not msg.reconfigure:
-            config.devices.clear()
-        await asyncio.sleep(0.25)
-        return _user_input_discovery
+        base_url = str(input_values.get("base_url") or f"http://{address}:80/device")
+        self._last_timeout = timeout
 
-    if isinstance(msg, UserDataResponse):
-        if _setup_step == SetupSteps.DISCOVER:
-            return await _handle_discovery(msg)
-        if _setup_step == SetupSteps.DEVICE_CHOICE:
-            return await _handle_choice(msg)
-        if _setup_step == SetupSteps.PIN:
-            return await _handle_pin(msg)
+        client = FrontierSiliconClient(base_url, pin, timeout)
+        try:
+            name = await client.test_connection()
+            presets = [preset.name for preset in await client.get_presets() if preset.name]
+        except Exception as exc:
+            _LOG.warning("Failed to validate radio %s: %s", address, exc)
+            return SetupError(error_type=IntegrationSetupError.AUTHORIZATION_ERROR)
+        finally:
+            await client.close()
 
-    if isinstance(msg, AbortDriverSetup):
-        _LOG.info("Setup aborted: %s", msg.error)
-        _setup_step = SetupSteps.INIT
-        return SetupError(error_type=IntegrationSetupError.CANCELED)
+        existing = self._find_existing_by_address(address)
+        identifier = existing.identifier if existing else f"fsradio_{uuid4().hex[:8]}"
 
-    return SetupError(error_type=IntegrationSetupError.OTHER)
+        return RadioDeviceConfig(
+            identifier=identifier,
+            name=name or address,
+            address=address,
+            base_url=base_url,
+            pin=pin,
+            timeout=timeout,
+            presets=presets,
+        )
 
+    async def discover_devices(self, user_input: dict | None = None) -> list[DiscoveredDevice]:
+        user_input = user_input or {}
+        timeout = float(user_input.get("timeout", 2) or 2)
+        self._last_timeout = timeout
 
-async def _handle_discovery(msg: UserDataResponse) -> SetupAction:
-    global _discovered, _setup_step
-    address = str(msg.input_values.get("address", "")).strip()
-    timeout = float(msg.input_values.get("timeout", 2) or 2)
+        address = str(user_input.get("address", "")).strip()
+        if address:
+            device = DiscoveredDevice(
+                identifier=address,
+                name=address,
+                address=address,
+                extra_data={
+                     "base_url": f"http://{address}:80/device",
+                },
+             )
+            self._discovered = {device.identifier: device}
+            return [device]
 
-    if address:
-        radio = DiscoveredRadio(address=address, location=f"http://{address}:80/device", usn=address, server="", st="")
-        _discovered = [radio]
-    else:
-        _discovered = await discover_radios(timeout=3.0)
+        self._ssdp.timeout = int(max(1, round(timeout)))
+        devices = await self._ssdp.discover()
+        self._discovered = {device.identifier: device for device in devices}
+        return devices
 
-    if not _discovered:
-        return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
+    async def handle_driver_setup(self, msg: ucapi.DriverSetupRequest) -> ucapi.SetupAction:
+        """
+        Entry point for setup_driver requests from the Remote.
+        """
+        _LOG.debug("handle_driver_setup reconfigure=%s setup_data=%s", msg.reconfigure, msg.setup_data)
 
-    items = []
-    for radio in _discovered:
-        label = radio.name or radio.address
-        items.append({"id": radio.address, "label": {"en": f"{label} [{radio.address}]"}})
+        # Start with our manual/discovery screen.
+        # We intentionally do not clear existing config here.
+        return self.get_manual_entry_form()
 
-    _setup_step = SetupSteps.DEVICE_CHOICE
-    return RequestUserInput(
-        {"en": "Choose radio", "de": "Radio auswählen"},
-        [
+    async def handle_user_data_response(self, msg: ucapi.UserDataResponse) -> ucapi.SetupAction:
+        """
+        Process responses for all subsequent setup screens.
+
+        UC returns values from all previous screens in msg.input_values.
+        """
+        values = msg.input_values or {}
+        _LOG.debug("handle_user_data_response input_values=%s", values)
+
+        # Final step: PIN entered -> validate and finish
+        if "step2.pin" in values:
+            address = str(values.get("address", "")).strip()
+            base_url = None
+
+            # Discovery path: a choice was made on step 1
+            choice = str(values.get("step1.choice", "")).strip()
+            if choice and choice in self._discovered:
+                selected = self._discovered[choice]
+                address = selected.address
+                base_url = str(selected.extra_data.get("base_url") or f"http://{address}:80/device")
+
+            # Manual path: address came from the first screen
+            if not address:
+                return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
+
+            config_or_error = await self.query_device(
+                {
+                    "address": address,
+                    "base_url": base_url,
+                    "pin": values.get("step2.pin"),
+                    "timeout": values.get("step2.timeout", values.get("timeout", self._last_timeout)),
+                }
+            )
+
+            if isinstance(config_or_error, SetupError):
+                return config_or_error
+
+            self.config_manager.add_or_update(config_or_error)
+
+            # Re-register configured device instances so the new config becomes active.
+            if hasattr(self.driver, "register_all_device_instances"):
+                await self.driver.register_all_device_instances(connect=False)
+
+            return SetupComplete()
+
+        # Step 1 submitted
+        address = str(values.get("address", "")).strip()
+        timeout = float(values.get("timeout", self._last_timeout) or self._last_timeout)
+        self._last_timeout = timeout
+
+        # Manual IP path: ask for PIN directly
+        if address:
+            return RequestUserInput(
+                {"en": "Enter PIN", "de": "PIN eingeben"},
+                [
+                    {
+                        "id": "info",
+                        "label": {"en": "Selected device", "de": "Gewähltes Gerät"},
+                        "field": {"label": {"value": {"en": address, "de": address}}},
+                    },
+                    {
+                        "id": "step2.pin",
+                        "label": {"en": "PIN", "de": "PIN"},
+                        "field": {"text": {"value": "1234"}},
+                    },
+                    {
+                        "id": "step2.timeout",
+                        "label": {"en": "HTTP timeout in seconds", "de": "HTTP-Timeout in Sekunden"},
+                        "field": {"number": {"value": timeout}},
+                    },
+                ],
+            )
+
+        # Discovery path: no address entered, so run SSDP
+        devices = await self.discover_devices(values)
+        if not devices:
+            return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
+
+        dropdown_items = [
             {
-                "id": "choice",
-                "label": {"en": "Discovered radio", "de": "Gefundenes Radio"},
-                "field": {"dropdown": {"value": items[0]["id"], "items": items}},
-            },
-            {
-                "id": "timeout",
-                "label": {"en": "HTTP timeout in seconds", "de": "HTTP-Timeout in Sekunden"},
-                "field": {"number": {"value": timeout}},
-            },
-        ],
-    )
+                "id": device.identifier,
+                "label": {
+                    "en": f"{device.name} ({device.address})",
+                    "de": f"{device.name} ({device.address})",
+                },
+            }
+            for device in devices
+        ]
 
+        return RequestUserInput(
+            {"en": "Select radio", "de": "Radio auswählen"},
+            [
+                {
+                    "id": "step1.choice",
+                    "label": {"en": "Discovered radios", "de": "Gefundene Radios"},
+                    "field": {
+                        "dropdown": {
+                            "value": "",
+                            "items": dropdown_items,
+                        }
+                    },
+                },
+                {
+                    "id": "step2.pin",
+                    "label": {"en": "PIN", "de": "PIN"},
+                    "field": {"text": {"value": "1234"}},
+                },
+                {
+                    "id": "step2.timeout",
+                    "label": {"en": "HTTP timeout in seconds", "de": "HTTP-Timeout in Sekunden"},
+                    "field": {"number": {"value": timeout}},
+                },
+            ],
+        )
 
-async def _handle_choice(msg: UserDataResponse) -> SetupAction:
-    global _pending_choice, _setup_step
-    choice = str(msg.input_values["choice"])
-    _pending_choice = None
-    for item in _discovered:
-        if item.address == choice:
-            _pending_choice = item
-            break
-    if _pending_choice is None:
-        return SetupError(error_type=IntegrationSetupError.OTHER)
+    def is_duplicate(self, config: RadioDeviceConfig) -> bool:
+        for item in self.config_manager.all():
+            if item.address == config.address and item.identifier != config.identifier:
+                return True
+        return False
 
-    _setup_step = SetupSteps.PIN
-    return RequestUserInput(
-        {"en": "Enter radio PIN", "de": "Radio-PIN eingeben"},
-        [
-            {
-                "id": "pin",
-                "label": {"en": "PIN", "de": "PIN"},
-                "field": {"text": {"value": "1234"}},
-            },
-            {
-                "id": "timeout",
-                "label": {"en": "HTTP timeout in seconds", "de": "HTTP-Timeout in Sekunden"},
-                "field": {"number": {"value": float(msg.input_values.get("timeout", 2) or 2)}},
-            },
-        ],
-    )
-
-
-async def _handle_pin(msg: UserDataResponse) -> SetupAction:
-    global _pending_choice, _setup_step
-    if _pending_choice is None:
-        return SetupError(error_type=IntegrationSetupError.OTHER)
-
-    pin = int(str(msg.input_values["pin"]).strip())
-    timeout = float(msg.input_values.get("timeout", 2) or 2)
-    client = FrontierSiliconClient(_pending_choice.base_url, pin, timeout)
-
-    try:
-        name = await client.test_connection()
-    except Exception as exc:
-        _LOG.warning("Failed to validate radio %s: %s", _pending_choice.address, exc)
-        return SetupError(error_type=IntegrationSetupError.AUTHORIZATION_ERROR)
-    finally:
-        await client.close()
-
-    existing = config.devices.get_by_address(_pending_choice.address)
-    if existing:
-        config.devices.remove(existing.id)
-
-    device = config.create_device(
-        name=name,
-        address=_pending_choice.address,
-        base_url=_pending_choice.base_url,
-        pin=pin,
-        timeout=timeout,
-    )
-    config.devices.add(device)
-    _pending_choice = None
-    _setup_step = SetupSteps.INIT
-    return SetupComplete()

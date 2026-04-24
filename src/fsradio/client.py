@@ -330,8 +330,6 @@ class FrontierSiliconClient:
                     channel_name = preset.name
                     break
 
-        # UC media-player has no official channel_name field.
-        # Expose the station name via media_album instead.
         if channel_name:
             if not media_album or media_album.casefold() in {"unknown", "n/a"}:
                 media_album = channel_name
@@ -344,13 +342,14 @@ class FrontierSiliconClient:
             pass
 
         _LOG.debug(
-            "metadata source=%s name=%r text=%r artist=%r album=%r image=%r -> channel=%r title=%r artist=%r",
+            "metadata source=%s name=%r text=%r artist=%r album=%r image=%r -> channel=%r title=%r artist=%r album_out=%r",
             source,
             play_name,
             play_text,
             play_artist,
             play_album,
             play_image,
+            channel_name,
             media_title,
             media_artist,
             media_album,
