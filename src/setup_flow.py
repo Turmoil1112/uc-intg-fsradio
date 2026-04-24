@@ -57,6 +57,23 @@ class FrontierSiliconSetupFlow(BaseSetupFlow[RadioDeviceConfig]):
             ],
         )
 
+    @staticmethod
+    def stable_identifier_from_usn(usn: str, address: str) -> str:
+        raw = (usn or "").strip()
+
+        if raw:
+            uuid_part = raw.split("::", 1)[0]
+
+            if uuid_part.lower().startswith("uuid:"):
+                uuid_part = uuid_part[5:]
+
+            uuid_part = uuid_part.strip().lower()
+
+            if uuid_part:
+                return f"fsradio_{uuid_part}"
+
+        return f"fsradio_{address.replace('.', '_').replace(':', '_')}"
+
     async def query_device(self, input_values: dict) -> RadioDeviceConfig | SetupError:
         """
         Validate a single radio and build the final config object.
@@ -91,7 +108,12 @@ class FrontierSiliconSetupFlow(BaseSetupFlow[RadioDeviceConfig]):
             await client.close()
 
         existing = self._find_existing_by_address(address)
-        identifier = existing.identifier if existing else f"fsradio_{uuid4().hex[:8]}"
+
+        if existing:
+            identifier = existing.identifier
+        else:
+            raw_usn = str(input_values.get("usn") or "").strip()
+            identifier = self.stable_identifier_from_usn(raw_usn, address)
 
         return RadioDeviceConfig(
             identifier=identifier,
@@ -167,6 +189,7 @@ class FrontierSiliconSetupFlow(BaseSetupFlow[RadioDeviceConfig]):
                     "base_url": base_url,
                     "pin": values.get("step2.pin"),
                     "timeout": values.get("step2.timeout", values.get("timeout", self._last_timeout)),
+                    "usn": selected.extra_data.get("usn"),
                 }
             )
 
