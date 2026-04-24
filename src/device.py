@@ -120,3 +120,9 @@ class FrontierSiliconDevice(PollingDevice):
         ok = await self.verify_connection()
         if not ok:
             raise ConnectionError(f"Unable to connect to Frontier Silicon radio at {self.address}")
+
+    async def browse_media(self, options: media_player.BrowseOptions):
+        return await self._client.browse_media(options)
+
+    async def play_media(self, media_id: str, media_type: str | None = None) -> None:
+        await self._client.play_media(media_id, media_type)

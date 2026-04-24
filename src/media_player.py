@@ -30,10 +30,16 @@ class FrontierSiliconMediaPlayer(media_player.MediaPlayer, Entity):
                 media_player.Features.STOP,
                 media_player.Features.NEXT,
                 media_player.Features.PREVIOUS,
+                media_player.Features.BROWSE_MEDIA,
+                media_player.Features.PLAY_MEDIA,
+                media_player.Features.PLAY_MEDIA_ACTION,
             ],
             attributes={
                 media_player.Attributes.STATE: media_player.States.UNKNOWN,
                 media_player.Attributes.SOURCE_LIST: [],
+                media_player.Attributes.PLAY_MEDIA_ACTION: [
+                    media_player.MediaPlayAction.PLAY_NOW,
+                ],
             },
             device_class=media_player.DeviceClasses.SPEAKER,
             cmd_handler=self.handle_command,
@@ -108,11 +114,8 @@ class FrontierSiliconMediaPlayer(media_player.MediaPlayer, Entity):
             if cmd_id == media_player.Commands.PLAY_PAUSE:
                 await self._device.play_pause()
                 return StatusCodes.OK
-            if cmd_id == media_player.Commands.PLAY:
-                await self._device.play()
-                return StatusCodes.OK
-            if cmd_id == media_player.Commands.PAUSE:
-                await self._device.pause()
+            if cmd_id == media_player.Commands.PLAY_PAUSE:
+                await self._device.play_pause()
                 return StatusCodes.OK
             if cmd_id == media_player.Commands.STOP:
                 await self._device.stop()
@@ -123,8 +126,20 @@ class FrontierSiliconMediaPlayer(media_player.MediaPlayer, Entity):
             if cmd_id == media_player.Commands.PREVIOUS:
                 await self._device.previous()
                 return StatusCodes.OK
+            if cmd_id == media_player.Commands.PLAY_MEDIA:
+                media_id = (params or {}).get("media_id")
+                media_type = (params or {}).get("media_type")
+
+                if not media_id:
+                    return StatusCodes.BAD_REQUEST
+
+                await self._device.play_media(media_id, media_type)
+                return StatusCodes.OK
         except Exception as exc:
-            _LOG.warning("[%s] command %s failed: %s", self._device_config.name, cmd_id, exc)
+            _LOG.exception("[%s] command %s failed", self._device_config.name, cmd_id)
             return StatusCodes.SERVICE_UNAVAILABLE
 
         return StatusCodes.NOT_IMPLEMENTED
+
+    async def browse(self, options: media_player.BrowseOptions):
+        return await self._device.browse_media(options)
