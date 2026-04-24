@@ -2,3 +2,6 @@ build/
 dist/
 intg-fsradio.spec
 fsradio-radio-metadata.patch
+build.sh
+bin/
+uc-intg-fsradio.tar.gz
